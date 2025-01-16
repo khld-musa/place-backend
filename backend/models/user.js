@@ -12,20 +12,18 @@ const userSchema = new mongoose.Schema({
   },
   email: {
     type: String,
-    required: [false, "Please enter your email"],
+    required: [true, "Please enter your email"],
+    unique: true,
     validate: [validator.isEmail, "Please enter valid email address"],
   },
   phone: {
     type: String,
     required: [true, "Please enter your phone number"],
-    unique: true,
-    // validate: [validator.isEmail, "Please enter valid email address"],
   },
   lname: {
     type: String,
     required: [false, "Please enter your last name"],
-    unique: false,
-    // validate: [validator.isEmail, "Please enter valid email address"],
+    maxLength: [30, "Your name cannot exceed 30 characters"],
   },
   password: {
     type: String,
@@ -49,6 +47,9 @@ const userSchema = new mongoose.Schema({
   },
   phoneOtp: {
     type: String,
+  },
+  avatar : {
+    data: String,
   },
 
   role: {

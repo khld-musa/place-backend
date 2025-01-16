@@ -1,23 +1,21 @@
-// const multer = require("multer");
+const multer = require("multer");
+const path = require("path");
+const ErrorHandler = require("./errorHandler");
 
-
-//multer config
-const multer = async (optionsUser) => {
-const Storage = multer.diskStorage({
-    destination: "backend/controllers/bokImages",
+const configureMulter = (destination) => {
+  const storage = multer.diskStorage({
+    destination,
     filename: (req, file, cb) => {
       let ext = path.extname(file.originalname);
       if (ext !== ".jpg" && ext !== ".jpeg" && ext !== ".png") {
         cb(new ErrorHandler("file type is not supported"), false);
         return;
       }
-      cb(null, Date.now() + "-" + 'bokImages' + ext);
+      cb(null, Date.now() + "-" + path.basename(destination) + ext);
     },
   });
-  
-  const upload = multer({
-    storage: Storage,
-  }).single("testImage");
-}
 
-module.exports = multer;
+  return multer({ storage }).single("testImage");
+};
+
+module.exports = configureMulter;

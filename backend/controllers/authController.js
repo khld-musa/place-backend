@@ -1,33 +1,13 @@
 const User = require("../models/user");
 const fs = require('fs');
 const path = require('path');
-const multer = require("multer");
 
 const ErrorHandler = require("../utilities/errorHandler");
 const catchAsyncErrors = require("../middlewares/catchAsyncErrors");
 const sendToken = require("../utilities/jwtToken");
 const sendEmail = require("../utilities/sendMessage");
 const { compare } = require("bcryptjs");
-
-
-
-//multer config
-const Storage = multer.diskStorage({
-  destination: "backend/controllers/userImages",
-  filename: (req, file, cb) => {
-    let ext = path.extname(file.originalname);
-    if (ext !== ".jpg" && ext !== ".jpeg" && ext !== ".png") {
-      cb(new ErrorHandler("file type is not supported"), false);
-      return;
-    }
-    cb(null, Date.now() + "-" + 'userImages' + ext);
-  },
-});
-
-const upload = multer({
-  storage: Storage,
-}).single("testImage");
-
+const configureMulter = require("../utilities/multer");
 
 //registerOTP => /api/v1/register/otp
 exports.registerOtp = catchAsyncErrors(async (req, res, next) => {
@@ -64,24 +44,39 @@ exports.registerOtp = catchAsyncErrors(async (req, res, next) => {
 
     return next(new ErrorHandler(error.message, 500));
   }
-})
+});
 
-// Register a user   => /api/v1/register
-
+// Register a user => /api/v1/register
 exports.registerUser = catchAsyncErrors(async (req, res, next) => {
-  var user = await User.findOne({ email: req.body.email });
+  // Proceed with file upload after validations
+  const upload = configureMulter("backend/controllers/userImages");
+  upload(req, res, async (err) => {
+    if (err) {
+      return next(new ErrorHandler(err.message || "File upload error", 500));
+    }
 
-  const { fname, email, phone, password, lname, confPassword} = req.body;
-  if (req.body.password !== req.body.confPassword) {
-    return next(new ErrorHandler("Passwords not match", 401));
-  }
-  
+    const { fname, email, phone, password, confPassword, lname } = req.body;
 
-  if (user) {
-    return next(new ErrorHandler("User with this phone number already exist", 404));
-  }
-   try {
-    const user = await User.create({
+    // Check if user with the given email already exists
+    const user = await User.findOne({ email });
+    if (user) {
+      // Unlink the recently uploaded picture
+      if (req.file && req.file.path) {
+        fs.unlink(req.file.path, (unlinkErr) => {
+          if (unlinkErr) {
+            return next(new ErrorHandler("Error deleting file", 500));
+          }
+        });
+      }
+      return next(new ErrorHandler("User with this email already exists", 404));
+    }
+
+    // Check if passwords match
+    if (password !== confPassword) {
+      return next(new ErrorHandler("Passwords do not match", 401));
+    }
+
+    const newUser = await User.create({
       fname,
       lname,
       email,
@@ -92,16 +87,12 @@ exports.registerUser = catchAsyncErrors(async (req, res, next) => {
         data: req.file.filename,
       },
     });
-  
 
-  res.status(200).json({
-    success: true,
-    user,
+    res.status(200).json({
+      success: true,
+      newUser,
+    });
   });
-   } catch (err) {
-    next(err);
-   }
-
 });
 
 // validateOtp  => /api/v1/register/validation
@@ -318,18 +309,35 @@ exports.updateProfile = catchAsyncErrors(async (req, res, next) => {
   };
 
   // Update avatar
-  if (req.file) {
-    const avatarPath = path.join(__dirname, 'userImages', user.avatar.data);
-    
-    // Delete old avatar
-    if (fs.existsSync(avatarPath)) {
-      fs.unlinkSync(avatarPath);
+  const upload = configureMulter("backend/controllers/userImages");
+  upload(req, res, async (err) => {
+    if (err) {
+      return next(new ErrorHandler(err.message || "File upload error", 500));
     }
 
-    newUserData.avatar = {
-      data: req.file.filename,
-    };
-  }
+    if (req.file) {
+      const avatarPath = path.join(__dirname, 'userImages', user.avatar.data);
+
+      // Delete old avatar
+      if (fs.existsSync(avatarPath)) {
+        fs.unlinkSync(avatarPath);
+      }
+
+      newUserData.avatar = {
+        data: req.file.filename,
+      };
+    }
+
+    await User.findByIdAndUpdate(req.user.id, newUserData, {
+      new: true,
+      runValidators: true,
+      useFindAndModify: false,
+    });
+
+    res.status(200).json({
+      success: true,
+    });
+  });
 });
 
 // Logout user   =>   /api/v1/logout
