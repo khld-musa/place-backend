@@ -9,21 +9,101 @@ const sendEmail = require("../utilities/sendMessage");
 const { compare } = require("bcryptjs");
 const configureMulter = require("../utilities/multer");
 
-//registerOTP => /api/v1/register/otp
-exports.registerOtp = catchAsyncErrors(async (req, res, next) => {
-  // Get reset token
-  const user = await User.findOne({ email: req.body.email });
+// // registerOTP => /api/v1/register/otp
+// exports.registerOtp = catchAsyncErrors(async (req, res, next) => {
+//   // Get reset token
+//   const user = await User.findOne({ email: req.body.email });
 
-  if (!user) {
-    return next(new ErrorHandler("User not found with this email", 404));
-  }
+//   if (!user) {
+//     return next(new ErrorHandler("User not found with this email", 404));
+//   }
 
+//   const resetToken = user.getRegisterToken();
+
+//   await user.save({ validateBeforeSave: false });
+
+//   // const message = `Your password reset token is as follow:\n\n${resetToken}\n\nIf you have not requested this phone, then ignore it.`;
+//   const message = `Your password reset token is as follow:\n ${resetToken}\n\nIf you have not requested this email, then ignore it.`;
+
+//   try {
+//     await sendEmail({
+//       email: user.email,
+//       subject: "Validation OTP",
+//       message,
+//     });
+
+//     res.status(200).json({
+//       success: true,
+//       message: `Email sent to: ${user.email}`,
+//     });
+//   } catch (error) {
+//     user.registerToken = undefined;
+//     user.registerExpire = undefined;
+
+//     await user.save({ validateBeforeSave: false });
+
+//     return next(new ErrorHandler(error.message, 500));
+//   }
+// });
+
+// // Register a user => /api/v1/register
+// exports.registerUser = catchAsyncErrors(async (req, res, next) => {
+//   // Proceed with file upload after validations
+//   const upload = configureMulter("backend/controllers/userImages");
+//   upload(req, res, async (err) => {
+//     if (err) {
+//       return next(new ErrorHandler(err.message || "File upload error", 500));
+//     }
+
+//     const { fname, email, phone, password, confPassword, lname } = req.body;
+
+//     // Check if user with the given email already exists
+//     const user = await User.findOne({ email });
+//     if (user) {
+//       // Unlink the recently uploaded picture
+//       if (req.file && req.file.path) {
+//         fs.unlink(req.file.path, (unlinkErr) => {
+//           if (unlinkErr) {
+//             return next(new ErrorHandler("Error deleting file", 500));
+//           }
+//         });
+//       }
+//       return next(new ErrorHandler("User with this email already exists", 404));
+//     }
+
+//     // Check if passwords match
+//     if (password !== confPassword) {
+//       return next(new ErrorHandler("Passwords do not match", 401));
+//     }
+
+//     const newUser = await User.create({
+//       fname,
+//       lname,
+//       email,
+//       phone,
+//       password,
+//       confPassword,
+//       avatar: {
+//         data: req.file.filename,
+//       },
+//     });
+
+//     registerOtp();
+//     await newUser.save({ validateBeforeSave: false });
+
+//     res.status(200).json({
+//       success: true,
+//       newUser,
+//     });
+//   });
+// });
+
+// Function to generate and send OTP
+const registerOtp = async (user) => {
   const resetToken = user.getRegisterToken();
-
   await user.save({ validateBeforeSave: false });
 
-  // const message = `Your password reset token is as follow:\n\n${resetToken}\n\nIf you have not requested this phone, then ignore it.`;
-  const message = `Your password reset token is as follow:\n ${resetToken}\n\nIf you have not requested this email, then ignore it.`;
+  const message = `Your registration OTP is as follows:\n ${resetToken}\n\nIf you have not requested this email, then ignore it.`;
 
   try {
     await sendEmail({
@@ -31,20 +111,15 @@ exports.registerOtp = catchAsyncErrors(async (req, res, next) => {
       subject: "Validation OTP",
       message,
     });
-
-    res.status(200).json({
-      success: true,
-      message: `Email sent to: ${user.email}`,
-    });
   } catch (error) {
     user.registerToken = undefined;
     user.registerExpire = undefined;
 
     await user.save({ validateBeforeSave: false });
 
-    return next(new ErrorHandler(error.message, 500));
+    throw new Error(error.message);
   }
-});
+};
 
 // Register a user => /api/v1/register
 exports.registerUser = catchAsyncErrors(async (req, res, next) => {
@@ -88,40 +163,52 @@ exports.registerUser = catchAsyncErrors(async (req, res, next) => {
       },
     });
 
-    res.status(200).json({
-      success: true,
-      newUser,
-    });
+    try {
+      await registerOtp(newUser);
+      res.status(200).json({
+        success: true,
+        message: `Email sent to: ${newUser.email}`,
+        newUser,
+      });
+    } catch (error) {
+      return next(new ErrorHandler(error.message, 500));
+    }
   });
 });
 
-// validateOtp  => /api/v1/register/validation
-exports.validateUserSignUp = catchAsyncErrors(async (req, res, next) => {
-  const { registerUserToken } = req.body;
+// Validate OTP => /api/v1/register/validation
+const validateRegisterToken = async (token, user) => {
+  return user.registerUserToken === token && user.registerUserExpire > Date.now();
+};
 
-  const user = await User.findOne({ email: req.body.email });
+// Validate OTP => /api/v1/register/validation
+exports.validateUserSignUp = catchAsyncErrors(async (req, res, next) => {
+  const { email, registerUserToken } = req.body;
+
+  const user = await User.findOne({ email });
 
   if (!user) {
-    return next(
-      new ErrorHandler(
-        "Password reset token is invalid or has been expired",
-        400
-      )
-    );
+    return next(new ErrorHandler("Invalid email or token", 400));
   }
-  if (req.body.registerUserToken
-    !== user.registerUserToken
-  ) {
-    return next(new ErrorHandler("invalid otp", 400));
+
+  const isTokenValid = await validateRegisterToken(registerUserToken, user);
+  console.log(isTokenValid);
+  if (!isTokenValid) {
+    return next(new ErrorHandler("Invalid or expired token", 400));
   }
-  sendToken(user, 200, res);
+
+  user.registerToken = undefined;
+  user.registerExpire = undefined;
+  user.isValidated = true;
+
+  await user.save();
+
+  res.status(200).json({
+    success: true,
+    message: "User validated successfully",
+  });
 });
-
-
-
 // Login User  =>  /api/v1/login
-
-
 exports.loginUser = catchAsyncErrors(async (req, res, next) => {
   const { email, password } = req.body;
 
@@ -137,6 +224,11 @@ exports.loginUser = catchAsyncErrors(async (req, res, next) => {
     return next(new ErrorHandler("Invalid email or Password", 401));
   }
 
+  // Checks if the user has validated the OTP
+  if (!user.isValidated) {
+    return next(new ErrorHandler("Please validate your OTP before logging in", 401));
+  }
+
   // Checks if password is correct or not
   const isPasswordMatched = await user.comparePassword(password);
 
@@ -146,6 +238,58 @@ exports.loginUser = catchAsyncErrors(async (req, res, next) => {
 
   sendToken(user, 200, res);
 });
+
+// // validateOtp  => /api/v1/register/validation
+// exports.validateUserSignUp = catchAsyncErrors(async (req, res, next) => {
+//   const { registerUserToken } = req.body;
+
+//   const user = await User.findOne({ email: req.body.email });
+
+//   if (!user) {
+//     return next(
+//       new ErrorHandler(
+//         "Password reset token is invalid or has been expired",
+//         400
+//       )
+//     );
+//   }
+//   if (req.body.registerUserToken
+//     !== user.registerUserToken
+//   ) {
+//     return next(new ErrorHandler("invalid otp", 400));
+//   }
+//   sendToken(user, 200, res);
+// });
+
+
+
+// // Login User  =>  /api/v1/login
+// exports.loginUser = catchAsyncErrors(async (req, res, next) => {
+//   const { email, password } = req.body;
+
+//   // Checks if email and password is entered by user
+//   if (!email || !password) {
+//     return next(new ErrorHandler("Please enter email & password", 400));
+//   }
+
+//   // Finding user in database
+//   const user = await User.findOne({ email }).select("+password");
+
+//   if (!user) {
+//     return next(new ErrorHandler("Invalid email or Password", 401));
+//   }
+
+//   // Checks if password is correct or not
+//   const isPasswordMatched = await user.comparePassword(password);
+
+//   if (!isPasswordMatched) {
+//     return next(new ErrorHandler("Invalid email or Password", 401));
+//   }
+
+//   sendToken(user, 200, res);
+// });
+
+
 
 // Forgot Password   =>  /api/v1/password/forgot
 exports.forgotPassword = catchAsyncErrors(async (req, res, next) => {

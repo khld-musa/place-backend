@@ -66,6 +66,11 @@ const userSchema = new mongoose.Schema({
   registerUserToken: String,
   registerUserExpire: Date,
 
+  isValidated: {
+    type: Boolean,
+    default: false,
+  },
+
 });
 
 // Encrypting password before saving user
@@ -112,7 +117,7 @@ userSchema.methods.getResetPasswordToken = function () {
   this.resetPasswordToken = resetToken;
 
   // Set token expire time
-  this.regiserUserExpire = Date.now() + 30 * 60 * 1000;
+  this.resetPasswordExpire = Date.now() + 30 * 60 * 1000;
 
   return resetToken;
 };
@@ -126,7 +131,7 @@ userSchema.methods.getRegisterToken = function () {
   this.registerUserToken = registerToken;
 
   // Set token expire time
-  this.resetUserExpire = Date.now() + 30 * 60 * 1000;
+  this.registerUserExpire = Date.now() + 30 * 60 * 1000;
 
   return registerToken;
 };
